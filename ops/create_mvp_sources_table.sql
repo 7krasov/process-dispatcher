@@ -1,13 +1,12 @@
--- auto-generated definition
 create table sources
 (
     id                        int(11) unsigned auto_increment primary key,
-    name                      varchar(64)                                                                                                                                                    null,                                                                                                                                                null,
+    name                      varchar(64)                                                                                                                                                    null,
     status                    enum ('hold', 'run', 'error', 'update') charset utf8                                                                                           default 'hold'  not null,
     stage                     enum ('new', 'quarantine', 'prematch', 'match', 'live', 'deprecated', 'livenomatch', 'passivematch') charset utf8                              default 'new'   not null,
     matching_group            tinyint                                                                                                                                        default 0       not null,
     matching_prio             tinyint                                                                                                                                        default 2       not null,
-    matching_order            int unsigned                                                                                                                                   default 0       not null,                                                                                                                             default 0       not null,
+    matching_order            int unsigned                                                                                                                                   default 0       not null,
     update_photos             tinyint unsigned                                                                                                                               default 1       not null,
     classified                tinyint                                                                                                                                        default 0       not null,
     created_at                datetime                                                                                                                                                       null,
@@ -25,7 +24,3 @@ create table sources
     specificity               int unsigned                                                                                                                                   default 0       not null
 )
     collate = utf8_unicode_ci;
-
-
-create index matching_group
-    on sources (matching_group, matching_prio, matching_order);

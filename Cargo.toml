@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+chrono = "0.4.38"
+chrono-tz = "0.10.0"
 futures = { version = "0.3.31", features = ["std"] }
-sqlx = { version = "0.8.2", features = ["runtime-tokio", "mysql", "migrate"] }
+sqlx = { version = "0.8.2", features = ["runtime-tokio", "mysql", "migrate", "uuid"] }
 tokio = { version = "1.40.0", features = ["full"] }
+uuid = { version = "1.11.0", features = ["v4"] }

@@ -1,3 +1,8 @@
+#export env variables from .env file
+include .env
+export $(shell sed 's/=.*//' .env)
+
+
 MYSQL_STRING := "mysql://root:password@10.97.212.193:13306/process_dispatcher"
 MIGRATION_PATH := "./db/migrations"
 NEW_MIGRATION_NAME := "new_migration"
@@ -36,6 +41,7 @@ exec-mysql-client:
 #	kubectl -n default exec mysql-client -it -c mysql-client -- mysql -h mysql-service -P 13306 -ppassword
 	mysql -h 10.97.212.193 -P 13306 -u root -ppassword
 
-fmt:
-	cargo fmt
+run:
+	cargo run
+
 

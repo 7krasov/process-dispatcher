@@ -1,1 +1,4 @@
-SELECT * from process_dispatcher;
+SELECT
+    *
+from
+    dispatcher_processes;
