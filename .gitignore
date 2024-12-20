@@ -2,3 +2,4 @@
 .env
 process-dispatcher.code-workspace
 .vscode
+.idea

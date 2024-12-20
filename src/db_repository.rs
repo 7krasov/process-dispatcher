@@ -3,6 +3,9 @@ use sqlx::types::Uuid;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 use std::env;
 
+const ENV_PD_DATABASE_URL: &str = "PD_DATABASE_URL";
+const ENV_MVP_DATABASE_URL: &str = "MVP_DATABASE_URL";
+
 pub struct DbRepository {
     pd_connection_pool: MySqlPool,
     mvp_connection_pool: MySqlPool,
@@ -10,22 +13,22 @@ pub struct DbRepository {
 
 impl DbRepository {
     pub async fn new() -> Result<DbRepository, sqlx::Error> {
-        let db_url = env::var("PD_DATABASE_URL");
+        let db_url = env::var(ENV_PD_DATABASE_URL);
         if db_url.is_err() {
-            panic!("PD_DATABASE_URL is not set");
+            panic!("{}", format!("{} is not set", ENV_PD_DATABASE_URL));
         }
         let pd_connection_pool = MySqlPoolOptions::new()
             .max_connections(2)
-            .connect(db_url.unwrap().as_str())
+            .connect(&db_url.unwrap())
             .await?;
 
-        let db_url = env::var("MVP_DATABASE_URL");
+        let db_url = env::var(ENV_MVP_DATABASE_URL);
         if db_url.is_err() {
-            panic!("MVP_DATABASE_URL is not set");
+            panic!("{}", format!("{} is not set", ENV_MVP_DATABASE_URL));
         }
         let mvp_connection_pool = MySqlPoolOptions::new()
             .max_connections(2)
-            .connect(db_url.unwrap().as_str())
+            .connect(&db_url.unwrap())
             .await?;
 
         Ok(DbRepository {
@@ -35,7 +38,7 @@ impl DbRepository {
     }
 
     pub async fn available_source_ids_stream(
-        &mut self,
+        &self,
     ) -> Result<
         std::pin::Pin<Box<dyn Stream<Item = Result<sqlx::mysql::MySqlRow, sqlx::Error>> + Send>>,
         sqlx::Error,
@@ -47,7 +50,7 @@ impl DbRepository {
     }
 
     pub async fn insert_new_process(
-        &mut self,
+        &self,
         source_id: u32,
         state: String,
     ) -> Result<(), sqlx::Error> {
@@ -67,56 +70,8 @@ impl DbRepository {
         Ok(())
     }
 
-    pub async fn active_processes_stream_for_source<'a>(
-        &mut self,
-        source_id: u32,
-        states_to_exclude: Vec<String>,
-        query_string: &'a mut String,
-    ) -> Result<
-        std::pin::Pin<
-            Box<dyn Stream<Item = Result<sqlx::mysql::MySqlRow, sqlx::Error>> + Send + 'a>,
-        >,
-        sqlx::Error,
-    > {
-        // Convert Vec<String> to a single comma-separated String with each element wrapped in single quotes
-        let states_to_exclude_str = &states_to_exclude
-            .iter()
-            .map(|s| format!("'{}'", s))
-            .collect::<Vec<_>>()
-            .join(",");
-
-        // // Construct the full SQL query string
-        *query_string = format!(
-            "SELECT * FROM dispatcher_processes WHERE source_id = {} AND state NOT IN ({})",
-            source_id, states_to_exclude_str
-        );
-        println!("{:?}", query_string);
-
-        let query = sqlx::query(query_string);
-
-        // let mut builder: QueryBuilder<'_, MySql> = QueryBuilder::new(
-        //     "SELECT * FROM dispatcher_processes WHERE source_id = ? AND state NOT IN ("
-        // );
-        // builder.push_bind(source_id);
-        // let mut separated = builder.separated(", ");
-        // for state in states_to_exclude {
-        //     separated.push_bind(state);
-        // }
-        // separated.push_unseparated(")");
-        // let query = builder.build();
-
-        // let query = sqlx::query(
-        //     "SELECT * FROM dispatcher_processes WHERE source_id = ? AND state NOT IN (?)",
-        // )
-        // .bind(source_id)
-        // .bind(states_to_exclude_str);
-
-        let processes = query.fetch(&self.pd_connection_pool);
-        Ok(processes)
-    }
-
     pub async fn get_latest_process_for(
-        &mut self,
+        &self,
         source_id: u32,
     ) -> Result<Option<sqlx::mysql::MySqlRow>, sqlx::Error> {
         let query = sqlx::query("SELECT * FROM dispatcher_processes WHERE source_id = ? ORDER BY created_at DESC LIMIT 1")

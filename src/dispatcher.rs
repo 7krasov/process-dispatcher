@@ -14,64 +14,55 @@ pub struct Dispatcher {
 
 impl Dispatcher {
     pub async fn new() -> Result<Dispatcher, sqlx::Error> {
-        let db_repository = DbRepository::new().await.unwrap();
+        let db_repository = DbRepository::new().await?;
         Ok(Dispatcher { db_repository })
     }
 
-    pub async fn prepare_schedule(&mut self) -> Result<(), sqlx::Error> {
+    pub async fn prepare_schedule(&self) -> Result<(), sqlx::Error> {
         println!("Preparing schedule...");
 
         let mut source_ids_to_process = self.db_repository.available_source_ids_stream().await?;
         while let Some(row) = source_ids_to_process.try_next().await? {
             let source_id: u32 = row.try_get("id").expect("unexpected source id result");
             println!("Processing source id: {}...", source_id);
-            let utc_now = chrono::Utc::now();
-            let timezone = Tz::from_str(TIMEZONE).expect("invalid timezone");
-            let now_in_tz = utc_now.with_timezone(&timezone);
 
-            //TODO: fix dirty fix
-            //cannot have local dynamic sql query string within a method (which is used below),
-            //as the string var is used within "processes" result which lives here out of method's local scope
-            let mut dirty_fix_string_var = String::new();
-
-            let mut processes = self
-                .db_repository
-                .active_processes_stream_for_source(
-                    source_id,
-                    vec![
-                        DispatchState::Completed.to_string(),
-                        DispatchState::Failed.to_string(),
-                    ],
-                    &mut dirty_fix_string_var,
-                )
-                .await?;
-            let process = processes.try_next().await?;
-
-            if process.is_some() {
-                println!(
-                    "An active process is already exist for source id: {}",
-                    source_id
-                );
-                continue;
-            }
-
+            //searching for potential not finished processes
             let process = self.db_repository.get_latest_process_for(source_id).await?;
             if process.is_some() {
-                let created_at_string: String = process
-                    .unwrap()
-                    .try_get("created_at")
-                    .expect("unexpected created_at result");
-                let datetime_format = "%Y-%m-%d %H:%M:%S%.f"; // Format for MySQL TIMESTAMP(3)
-                let created_at_utc =
-                    NaiveDateTime::parse_from_str(&created_at_string, datetime_format)
-                        .expect("Failed to parse datetime");
-                let created_at_in_timezone =
-                    DateTime::<Utc>::from_utc(created_at_utc, Utc).with_timezone(&timezone);
-
-                if now_in_tz.date_naive() == created_at_in_timezone.date_naive() {
+                let process = process.unwrap();
+                // let state: String = process.try_get("state").expect("unexpected state result");
+                //why Vec<u8>? see https://github.com/launchbadge/sqlx/issues/3387
+                let state: Vec<u8> = process
+                    .try_get("state")
+                    .expect("Unexpected 'state' result value from DB");
+                let state = String::from_utf8(state).expect("unexpected state result");
+                
+                //if not finished
+                if ![
+                    DispatchState::Completed.to_string(),
+                    DispatchState::Failed.to_string(),
+                ]
+                .contains(&state)
+                {
                     println!(
-                        "There is already present a finished process for today for source id: {} and date: {}",
-                        source_id, now_in_tz.date_naive()
+                        "There is already present a completed or failed process for source id: {}",
+                        source_id
+                    );
+                    continue;
+                }
+                //Completed, Failed
+
+                let created_at_string: String = process
+                    .try_get("created_at")
+                    .expect("unexpected 'created_at' result");
+
+                let created_at = DispatchTimeFormatter::db_to_dt(&created_at_string);
+                let now = DispatchTimeFormatter::now_dt();
+
+                if now.date_naive() == created_at.date_naive() {
+                    println!(
+                        "There is already present a finished/failed process for today for source id: {} and date: {}",
+                        source_id, now.date_naive()
                     );
                     continue;
                 }
@@ -102,5 +93,26 @@ impl fmt::Display for DispatchState {
             DispatchState::Completed => write!(f, "completed"),
             DispatchState::Failed => write!(f, "failed"),
         }
+    }
+}
+
+struct DispatchTimeFormatter;
+
+impl DispatchTimeFormatter {
+    pub fn db_to_dt(db_datetime: &str) -> DateTime<Tz> {
+        let datetime_format = "%Y-%m-%d %H:%M:%S%.f"; // Format for MySQL TIMESTAMP(3)
+        let created_at_utc = NaiveDateTime::parse_from_str(db_datetime, datetime_format)
+            .expect("Failed to parse datetime");
+        DateTime::<Utc>::from_naive_utc_and_offset(created_at_utc, Utc)
+            .with_timezone(&Self::timezone())
+    }
+
+    pub fn now_dt() -> DateTime<Tz> {
+        let utc_now = Utc::now();
+        utc_now.with_timezone(&Self::timezone())
+    }
+
+    fn timezone() -> Tz {
+        Tz::from_str(TIMEZONE).expect("invalid timezone")
     }
 }

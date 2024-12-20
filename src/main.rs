@@ -14,7 +14,7 @@ async fn main() {
 
     let _ = tokio::task::spawn(async move {
         loop {
-            let mut dispatcher_guard = dispatcher_arc_clone.lock().await;
+            let dispatcher_guard = dispatcher_arc_clone.lock().await;
             let result = dispatcher_guard.prepare_schedule().await;
             print!("Result: {:?}", result);
             tokio::time::sleep(Duration::from_secs(5)).await;

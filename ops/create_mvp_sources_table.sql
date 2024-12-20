@@ -1,3 +1,4 @@
+use mvp;
 create table sources
 (
     id                        int(11) unsigned auto_increment primary key,

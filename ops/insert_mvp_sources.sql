@@ -1,8 +1,9 @@
+use mvp;
 INSERT INTO
     sources (
         id,
         name,
-        domain,
+#         domain,
         status,
         stage,
         matching_group,
@@ -28,7 +29,7 @@ VALUES
     (
         1,
         'Engel & Völkers',
-        'www.engelvoelkers.com',
+#         'www.engelvoelkers.com',
         'run',
         'live',
         '0',
@@ -55,7 +56,7 @@ INSERT INTO
     sources (
         id,
         name,
-        domain,
+#         domain,
         status,
         stage,
         matching_group,
@@ -81,7 +82,7 @@ VALUES
     (
         2506,
         'Idealista',
-        'www.idealista.pt',
+#         'www.idealista.pt',
         'run',
         'match',
         '0',
