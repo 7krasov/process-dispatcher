@@ -1,9 +1,10 @@
 use super::db_repository::DbRepository;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
-use core::fmt;
 use futures::stream::TryStreamExt;
+use log::{info, trace};
 use sqlx::Row;
+use std::fmt::Display;
 use std::str::FromStr;
 
 const TIMEZONE: &str = "Europe/Berlin";
@@ -19,12 +20,12 @@ impl Dispatcher {
     }
 
     pub async fn prepare_schedule(&self) -> Result<(), sqlx::Error> {
-        println!("Preparing schedule...");
+        info!("Preparing schedule...");
 
         let mut source_ids_to_process = self.db_repository.available_source_ids_stream().await?;
         while let Some(row) = source_ids_to_process.try_next().await? {
             let source_id: u32 = row.try_get("id").expect("unexpected source id result");
-            println!("Processing source id: {}...", source_id);
+            trace!("Processing source id: {}...", source_id);
 
             //searching for potential not finished processes
             let process = self.db_repository.get_latest_process_for(source_id).await?;
@@ -32,25 +33,29 @@ impl Dispatcher {
                 let process = process.unwrap();
                 // let state: String = process.try_get("state").expect("unexpected state result");
                 //why Vec<u8>? see https://github.com/launchbadge/sqlx/issues/3387
-                let state: Vec<u8> = process
+                // let state: Vec<u8> = process
+                //     .try_get("state")
+                //     .expect("Unexpected 'state' result value from DB");
+                // let state = String::from_utf8(state).expect("unexpected state result");
+                let state: &str = process
                     .try_get("state")
                     .expect("Unexpected 'state' result value from DB");
-                let state = String::from_utf8(state).expect("unexpected state result");
-                
-                //if not finished
-                if ![
-                    DispatchState::Completed.to_string(),
-                    DispatchState::Failed.to_string(),
-                ]
-                .contains(&state)
-                {
-                    println!(
-                        "There is already present a completed or failed process for source id: {}",
+                let state = DispatchState::new(state);
+
+                //not: Completed, Failed
+                if !state.is_finished() {
+                    trace!(
+                        "There is already present process in state {} for source id: {}",
+                        state,
                         source_id
                     );
                     continue;
                 }
-                //Completed, Failed
+
+                // let processing_type: u8 = process
+                //     .try_get("type")
+                //     .expect("Unexpected 'type' result value from DB");
+                // let processing_type = ProcessingType::new(processing_type as isize);
 
                 let created_at_string: String = process
                     .try_get("created_at")
@@ -60,7 +65,7 @@ impl Dispatcher {
                 let now = DispatchTimeFormatter::now_dt();
 
                 if now.date_naive() == created_at.date_naive() {
-                    println!(
+                    trace!(
                         "There is already present a finished/failed process for today for source id: {} and date: {}",
                         source_id, now.date_naive()
                     );
@@ -68,30 +73,67 @@ impl Dispatcher {
                 }
             }
 
-            self.db_repository
-                .insert_new_process(source_id, DispatchState::Created.to_string())
+            let uuid = self
+                .db_repository
+                .insert_new_process(source_id, DispatchState::Created, ProcessingType::Regular)
                 .await?;
+
+            info!(
+                "A new regular process {} for source id: {} has been created",
+                uuid, source_id
+            );
         }
         Ok(())
     }
 }
 
+const DISPATCH_STATE_CREATED: &str = "created";
+const DISPATCH_STATE_PENDING: &str = "pending";
+const DISPATCH_STATE_PROCESSING: &str = "processing";
+const DISPATCH_STATE_COMPLETED: &str = "completed";
+const DISPATCH_STATE_FAILED: &str = "failed";
+
+#[derive(PartialEq)]
 pub enum DispatchState {
     Created,
-    // Pending,
-    // Processing,
+    Pending,
+    Processing,
     Completed,
     Failed,
 }
 
-impl fmt::Display for DispatchState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl DispatchState {
+    pub fn new(value: &str) -> DispatchState {
+        // match value.as_str() {
+        match value {
+            DISPATCH_STATE_CREATED => DispatchState::Created,
+            DISPATCH_STATE_PENDING => DispatchState::Pending,
+            DISPATCH_STATE_PROCESSING => DispatchState::Processing,
+            DISPATCH_STATE_COMPLETED => DispatchState::Completed,
+            DISPATCH_STATE_FAILED => DispatchState::Failed,
+            _ => panic!("Unexpected DispatchState value"),
+        }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        //if ![DispatchState::Completed, DispatchState::Failed].contains(&self) {}
+        //
+        // match self {
+        //     DispatchState::Completed | DispatchState::Failed => true,
+        //     _ => false,
+        // }
+        matches!(self, DispatchState::Completed | DispatchState::Failed)
+    }
+}
+
+impl Display for DispatchState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DispatchState::Created => write!(f, "created"),
-            // DispatchState::Pending => write!(f, "pending"),
-            // DispatchState::Processing => write!(f, "processing"),
-            DispatchState::Completed => write!(f, "completed"),
-            DispatchState::Failed => write!(f, "failed"),
+            DispatchState::Created => write!(f, "{}", DISPATCH_STATE_CREATED),
+            DispatchState::Pending => write!(f, "{}", DISPATCH_STATE_PENDING),
+            DispatchState::Processing => write!(f, "{}", DISPATCH_STATE_PROCESSING),
+            DispatchState::Completed => write!(f, "{}", DISPATCH_STATE_COMPLETED),
+            DispatchState::Failed => write!(f, "{}", DISPATCH_STATE_FAILED),
         }
     }
 }
@@ -114,5 +156,30 @@ impl DispatchTimeFormatter {
 
     fn timezone() -> Tz {
         Tz::from_str(TIMEZONE).expect("invalid timezone")
+    }
+}
+
+const PROCESSING_TYPE_REGULAR: isize = 1;
+const PROCESSING_TYPE_SANDBOX: isize = 2;
+
+#[derive(PartialEq)]
+pub enum ProcessingType {
+    Regular = PROCESSING_TYPE_REGULAR,
+    Sandbox = PROCESSING_TYPE_SANDBOX,
+}
+
+impl ProcessingType {
+    pub fn new(value: isize) -> ProcessingType {
+        match value {
+            PROCESSING_TYPE_REGULAR => ProcessingType::Regular,
+            PROCESSING_TYPE_SANDBOX => ProcessingType::Sandbox,
+            _ => panic!("Unexpected ProcessingType value"),
+        }
+    }
+}
+
+impl From<ProcessingType> for u8 {
+    fn from(processing_type: ProcessingType) -> Self {
+        processing_type as u8
     }
 }

@@ -1,3 +1,4 @@
+use crate::dispatcher::{DispatchState, ProcessingType};
 use futures::Stream;
 use sqlx::types::Uuid;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
@@ -45,29 +46,33 @@ impl DbRepository {
     > {
         let source_ids_to_process: std::pin::Pin<
             Box<dyn Stream<Item = Result<sqlx::mysql::MySqlRow, sqlx::Error>> + Send>,
-        > = sqlx::query("SELECT id FROM sources").fetch(&self.mvp_connection_pool);
+        > = sqlx::query("SELECT id FROM sources where status = 'run'")
+            .fetch(&self.mvp_connection_pool);
         Ok(source_ids_to_process)
     }
 
     pub async fn insert_new_process(
         &self,
         source_id: u32,
-        state: String,
-    ) -> Result<(), sqlx::Error> {
+        state: DispatchState,
+        processing_type: ProcessingType,
+    ) -> Result<Uuid, sqlx::Error> {
         let uuid_val = Uuid::new_v4();
 
         let query = sqlx::query(
-            "INSERT INTO dispatcher_processes (uuid, source_id, state) VALUES (?, ?, ?)",
+            "INSERT INTO dispatcher_processes (uuid, source_id, state, type) VALUES (?, ?, ?, ?)",
         )
         .bind(uuid_val)
         .bind(source_id)
-        .bind(state);
+        .bind(state.to_string())
+        .bind(u8::from(processing_type));
 
         // println!("{:?}", String::from(query.sql()));
 
         query.execute(&self.pd_connection_pool).await?;
+
         // dbg!(query.execute(&self.pd_connection_pool).await?);
-        Ok(())
+        Ok(uuid_val)
     }
 
     pub async fn get_latest_process_for(

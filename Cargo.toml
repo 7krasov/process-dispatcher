@@ -10,3 +10,5 @@ futures = { version = "0.3.31", features = ["std"] }
 sqlx = { version = "0.8.2", features = ["runtime-tokio", "mysql", "migrate", "uuid"] }
 tokio = { version = "1.40.0", features = ["full"] }
 uuid = { version = "1.11.0", features = ["v4"] }
+formatted_logger = "0.4.0"
+log = "0.4.22"
