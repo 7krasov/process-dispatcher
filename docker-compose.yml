@@ -1,0 +1,11 @@
+services:
+  process_dispatcher:
+    container_name: process_dispatcher
+    build:
+      context: .
+      dockerfile: ops/docker/process-dispatcher.Dockerfile
+    volumes:
+      - ".:/var/app"
+    working_dir: /var/app
+    #    command: /app/processes-dispatcher
+    command: tail -f /dev/null

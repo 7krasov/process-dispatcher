@@ -1,23 +1,25 @@
-use dispatcher::Dispatcher;
 use formatted_logger::LineLogger;
 use log::{error, info};
+use process_dispatcher::dispatcher::Dispatcher;
+use process_dispatcher::http_server::start_http_server;
 use std::str::FromStr;
-use std::{sync::Arc, time::Duration};
-use tokio::sync::Mutex;
-
-mod db_repository;
-mod dispatcher;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
-    let dispatcher = Dispatcher::new().await.unwrap();
-    let arc_dispatcher = Arc::new(Mutex::new(dispatcher));
-    let dispatcher_arc_clone = Arc::clone(&arc_dispatcher);
+    let env_params = process_dispatcher::env::fetch_env_params();
+    let dispatcher = Dispatcher::new(&env_params).await.unwrap();
+    // let arc_dispatcher = Arc::new(RwLock::new(dispatcher));
+    let arc_dispatcher = Arc::new(dispatcher);
 
+    arc_dispatcher.clone().start_clean_source_locks().await;
+
+    //continuously prepare the schedule
+    let dispatcher_arc_clone = arc_dispatcher.clone();
     let _ = tokio::task::spawn(async move {
         loop {
-            let dispatcher_guard = dispatcher_arc_clone.lock().await;
-            let result = dispatcher_guard.prepare_schedule().await;
+            let result = dispatcher_arc_clone.prepare_schedule().await;
             if result.is_err() {
                 error!("Error: {:?}", result.err());
             } else {
@@ -27,6 +29,8 @@ async fn main() {
         }
     })
     .await;
+
+    start_http_server(env_params.http_port(), arc_dispatcher.clone()).await;
 }
 
 pub fn init_logger() {

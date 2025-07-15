@@ -3,11 +3,13 @@ include .env
 export $(shell sed 's/=.*//' .env)
 
 
-MYSQL_STRING := "mysql://root:password@10.97.212.193:13306/process_dispatcher"
+#MYSQL_STRING := "mysql://root:password@10.97.212.193:13306/process_dispatcher"
+MYSQL_STRING := "mysql://root:password@127.0.0.1:3306/process_dispatcher"
 MIGRATION_PATH := "./db/migrations"
 NEW_MIGRATION_NAME := "new_migration"
 
-MVP_MYSQL_STRING := "mysql://root:password@10.97.212.193:13306/mvp"
+#MVP_MYSQL_STRING := "mysql://root:password@10.97.212.193:13306/mvp"
+MVP_MYSQL_STRING := "mysql://root:password@127.0.0.1:3306/mvp"
 MVP_MIGRATION_PATH := "./db/mvp_migrations"
 MVP_NEW_MIGRATION_NAME := "sources"
 
@@ -39,7 +41,7 @@ mvp.migrate.info:
 
 exec-mysql-client:
 #	kubectl -n default exec mysql-client -it -c mysql-client -- mysql -h mysql-service -P 13306 -ppassword
-	mysql -h 10.97.212.193 -P 13306 -u root -ppassword
+	mysql -h 127.0.0.1 -P 13306 -u root -ppassword
 
 run:
 	cargo run
