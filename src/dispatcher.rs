@@ -1,3 +1,5 @@
+mod error;
+
 use super::db_repository::DbRepository;
 use crate::async_keyed_mutex::AsyncKeyedMutex;
 use crate::env::EnvParams;
@@ -5,6 +7,7 @@ use crate::responses::AssignedProcess;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use chrono_tz::Tz::UTC;
+pub use error::DispatcherError;
 use futures::stream::TryStreamExt;
 use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
@@ -13,6 +16,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 const TIMEZONE: &str = "Europe/Berlin";
@@ -44,26 +48,54 @@ impl Dispatcher {
         .await;
     }
 
-    pub async fn prepare_schedule(&self) -> Result<(), sqlx::Error> {
+    pub async fn prepare_schedule(
+        &self,
+        shutdown_rx: &mut broadcast::Receiver<()>,
+    ) -> Result<(), DispatcherError> {
         info!("Preparing schedule...");
 
-        let mut source_ids_to_process = self.db_repository.available_source_ids_stream().await?;
-        while let Some(row) = source_ids_to_process.try_next().await? {
+        //requesting a stream (sending a request to DB without waiting for the response)
+        let mut source_ids_to_process = {
+            tokio::select! {
+                //if shutdown signal received during stream creation, we should return an error
+                _ = shutdown_rx.recv() => {
+                    info!("prepare_schedule: shutdown signal received during stream creation...");
+                    return Err(DispatcherError::TerminatingSignalReceived);
+                }
+                stream_result = self.db_repository.available_source_ids_stream() => {
+                    stream_result?
+                }
+            }
+        };
+
+        //fetching result rows from the stream
+        while let Some(row) = tokio::select! {
+            //if shutdown signal received during stream rows processing, we should return an error
+            _ =  shutdown_rx.recv() => {
+                info!("prepare_schedule: shutdown signal received during stream processing...");
+                return Err(DispatcherError::TerminatingSignalReceived);
+            }
+            next_result = source_ids_to_process.try_next() => {
+                next_result?
+            }
+        } {
             let source_id: u32 = row.try_get("id").expect("unexpected source id result");
             trace!("Processing source id: {}...", source_id);
 
             //lock the source for concurrent processing
             let lock = self.source_locks.get_mutex(source_id);
+            //TODO: pass shutdown_rx to process_source!
             let res = self.process_source(source_id).await;
             if let Err(e) = res {
                 error!("Error processing source id {}: {}", source_id, e);
             }
             drop(lock);
         }
+
         Ok(())
     }
 
-    async fn process_source(&self, source_id: u32) -> Result<(), sqlx::Error> {
+    async fn process_source(&self, source_id: u32) -> Result<(), DispatcherError> {
         //searching for potential not finished processes
         let process = self.db_repository.get_latest_process_for(source_id).await?;
         if process.is_some() {
