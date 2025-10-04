@@ -6,22 +6,56 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::signal::unix::SignalKind;
-use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
 async fn main() {
+    //init env variables
     let env_params = process_dispatcher::env::fetch_env_params();
 
-    //create a channel for posix signals
-    let (shutdown_tx, _shutdown_rx): (broadcast::Sender<()>, broadcast::Receiver<()>) =
-        broadcast::channel(1);
-    let shutdown_tx_clone = shutdown_tx.clone();
+    //prepare a mechanism for shutdown event processing
+    let cancellation_token = prepare_cancellation_token_on_posix_signal();
 
     let dispatcher = Dispatcher::new(&env_params).await.unwrap();
-    // let arc_dispatcher = Arc::new(RwLock::new(dispatcher));
     let arc_dispatcher = Arc::new(dispatcher);
 
+    //use cleaning of the lock mechanism for source ids
+    arc_dispatcher.clone().start_clean_source_locks().await;
+
+    //prepare continuous scheduling of processes
+    let dispatcher_arc_clone = arc_dispatcher.clone();
+    let cancellation_token_clone = cancellation_token.clone();
+    tokio::task::spawn(async move {
+        loop {
+            match dispatcher_arc_clone
+                .prepare_schedule(&cancellation_token_clone)
+                .await
+            {
+                Ok(_) => info!("Cycle completed successfully"),
+                Err(process_dispatcher::dispatcher::DispatcherError::TerminatingSignalReceived) => {
+                    info!("main:schedule_thread: Schedule preparation cancelled");
+                    break;
+                }
+                Err(e) => error!("Error: {:?}", e),
+            }
+        }
+    });
+
+    start_http_server(
+        env_params.http_port(),
+        arc_dispatcher.clone(),
+        &cancellation_token,
+    )
+    .await;
+
+    info!("Application shutdown completed");
+}
+
+fn prepare_cancellation_token_on_posix_signal() -> CancellationToken {
+    let cancellation_token = CancellationToken::new();
+
     //handle posix signals
+    let cancellation_token_clone = cancellation_token.clone();
     tokio::task::spawn(async move {
         let mut sigterm = signal::unix::signal(SignalKind::terminate())
             .expect("failed to install signal handler");
@@ -42,46 +76,10 @@ async fn main() {
             }
         }
 
-        //sending shutdown signal to all subscribers
-        shutdown_tx_clone.send(()).unwrap();
+        //notify all features that use cancellation token, so they will cancel their work
+        cancellation_token_clone.cancel();
     });
-
-    arc_dispatcher.clone().start_clean_source_locks().await;
-
-    //prepare continuous scheduling
-    let dispatcher_arc_clone = arc_dispatcher.clone();
-    let shutdown_tx_for_schedule = shutdown_tx.clone();
-    tokio::task::spawn(async move {
-        let mut shutdown_rx = shutdown_tx_for_schedule.subscribe();
-        loop {
-            let result = dispatcher_arc_clone
-                .prepare_schedule(&mut shutdown_rx)
-                .await;
-            if result.is_err() {
-                let err = result.err().unwrap();
-                if matches!(
-                    err,
-                    process_dispatcher::dispatcher::DispatcherError::TerminatingSignalReceived
-                ) {
-                    info!("main:schedule_thread: shutdown signal received, leaving the cycle...");
-                    break;
-                }
-                error!("Error: {:?}", err);
-            } else {
-                info!("Cycle completed successfully");
-            }
-        }
-    });
-
-    let shutdown_for_http = shutdown_tx.subscribe();
-    start_http_server(
-        env_params.http_port(),
-        arc_dispatcher.clone(),
-        shutdown_for_http,
-    )
-    .await;
-
-    info!("Application shutdown completed");
+    cancellation_token
 }
 
 pub fn init_logger() {

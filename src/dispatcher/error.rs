@@ -29,3 +29,9 @@ impl From<sqlx::Error> for DispatcherError {
         DispatcherError::DbError(e)
     }
 }
+
+impl From<crate::cancellation_ext::CancellationError> for DispatcherError {
+    fn from(_: crate::cancellation_ext::CancellationError) -> Self {
+        DispatcherError::TerminatingSignalReceived
+    }
+}

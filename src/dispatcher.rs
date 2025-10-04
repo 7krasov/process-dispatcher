@@ -2,6 +2,7 @@ mod error;
 
 use super::db_repository::DbRepository;
 use crate::async_keyed_mutex::AsyncKeyedMutex;
+use crate::cancellation_ext::CancellationExt;
 use crate::env::EnvParams;
 use crate::responses::AssignedProcess;
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -16,7 +17,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 const TIMEZONE: &str = "Europe/Berlin";
@@ -50,42 +51,34 @@ impl Dispatcher {
 
     pub async fn prepare_schedule(
         &self,
-        shutdown_rx: &mut broadcast::Receiver<()>,
+        cancellation_token: &CancellationToken,
     ) -> Result<(), DispatcherError> {
         info!("Preparing schedule...");
 
         //requesting a stream (sending a request to DB without waiting for the response)
-        let mut source_ids_to_process = {
-            tokio::select! {
-                //if shutdown signal received during stream creation, we should return an error
-                _ = shutdown_rx.recv() => {
-                    info!("prepare_schedule: shutdown signal received during stream creation...");
-                    return Err(DispatcherError::TerminatingSignalReceived);
-                }
-                stream_result = self.db_repository.available_source_ids_stream() => {
-                    stream_result?
-                }
-            }
-        };
+        let mut source_ids_to_process = self
+            .db_repository
+            .available_source_ids_stream()
+            .with_cancellation::<DispatcherError>(
+                cancellation_token,
+                "prepare_schedule:stream_creation",
+            )
+            .await?;
 
         //fetching result rows from the stream
-        while let Some(row) = tokio::select! {
-            //if shutdown signal received during stream rows processing, we should return an error
-            _ =  shutdown_rx.recv() => {
-                info!("prepare_schedule: shutdown signal received during stream processing...");
-                return Err(DispatcherError::TerminatingSignalReceived);
-            }
-            next_result = source_ids_to_process.try_next() => {
-                next_result?
-            }
-        } {
+        while let Some(row) = source_ids_to_process
+            .try_next()
+            .with_cancellation::<DispatcherError>(
+                cancellation_token,
+                "prepare_schedule:stream_processing",
+            )
+            .await?
+        {
             let source_id: u32 = row.try_get("id").expect("unexpected source id result");
             trace!("Processing source id: {}...", source_id);
 
-            //lock the source for concurrent processing
             let lock = self.source_locks.get_mutex(source_id);
-            //TODO: pass shutdown_rx to process_source!
-            let res = self.process_source(source_id).await;
+            let res = self.process_source(source_id, cancellation_token).await;
             if let Err(e) = res {
                 error!("Error processing source id {}: {}", source_id, e);
             }
@@ -95,9 +88,20 @@ impl Dispatcher {
         Ok(())
     }
 
-    async fn process_source(&self, source_id: u32) -> Result<(), DispatcherError> {
+    async fn process_source(
+        &self,
+        source_id: u32,
+        cancellation_token: &CancellationToken,
+    ) -> Result<(), DispatcherError> {
         //searching for potential not finished processes
-        let process = self.db_repository.get_latest_process_for(source_id).await?;
+        let process = self
+            .db_repository
+            .get_latest_process_for(source_id)
+            .with_cancellation::<DispatcherError>(
+                cancellation_token,
+                "process_source:get_latest_process",
+            )
+            .await?;
         if process.is_some() {
             let process = process.unwrap();
             // let state: String = process.try_get("state").expect("unexpected state result");
@@ -145,6 +149,10 @@ impl Dispatcher {
         let uuid = self
             .db_repository
             .insert_new_process(source_id, DispatchState::Created, ProcessingMode::Regular)
+            .with_cancellation::<DispatcherError>(
+                cancellation_token,
+                "process_source:insert_new_process",
+            )
             .await?;
 
         info!(
