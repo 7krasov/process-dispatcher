@@ -127,7 +127,7 @@
 //! # }
 //! ```
 
-use log::info;
+use tracing::info;
 use std::future::Future;
 use tokio_util::sync::CancellationToken;
 

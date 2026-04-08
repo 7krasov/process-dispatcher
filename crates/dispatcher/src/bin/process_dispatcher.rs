@@ -1,15 +1,15 @@
-use formatted_logger::LineLogger;
-use log::{error, info, warn};
 use process_dispatcher::dispatcher::Dispatcher;
 use process_dispatcher::http_server::start_http_server;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() {
+    init_tracing();
+
     //init env variables
     let env_params = process_dispatcher::env::fetch_env_params();
 
@@ -82,18 +82,10 @@ fn prepare_cancellation_token_on_posix_signal() -> CancellationToken {
     cancellation_token
 }
 
-pub fn init_logger() {
-    // let logger = JsonLogger::new(
-    let logger = LineLogger::new(
-        None, None,
-        // Some(vec![
-        //     // "sqlx::query".to_owned(),
-        // ]),
-    );
-    // let logger = JsonLogger::new(None, None);
-    log::set_boxed_logger(Box::new(logger)).unwrap();
-    //log::LOG_LEVEL_NAMES
-    // let log_level = std::env::var("LOG_LEVEL").unwrap_or_else(|_| "trace".to_string());
-    let log_level = std::env::var("LOG_LEVEL").unwrap_or_else(|_| "trace".to_string());
-    log::set_max_level(log::LevelFilter::from_str(log_level.as_str()).unwrap());
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new("trace"));
+
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 }

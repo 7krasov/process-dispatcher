@@ -9,7 +9,7 @@ use chrono_tz::Tz;
 use chrono_tz::Tz::UTC;
 pub use error::DispatcherError;
 use futures::stream::TryStreamExt;
-use log::{error, info, trace};
+use tracing::{error, info, trace};
 use shared::{AssignedProcess, DispatchState, ProcessingMode};
 use sqlx::mysql::MySqlRow;
 use sqlx::Row;

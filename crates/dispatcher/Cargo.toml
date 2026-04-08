@@ -11,8 +11,8 @@ futures = { version = "0.3.31", features = ["std"] }
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "mysql", "migrate", "uuid"] }
 tokio = { version = "1.40.0", features = ["full"] }
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
-formatted_logger = "0.4.0"
-log = "0.4.22"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 axum = { version = "0.8.4" }
 dashmap = "6.1.0"
 serde = { version = "1.0.210", features = ["derive"] }

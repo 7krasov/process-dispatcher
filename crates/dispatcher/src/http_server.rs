@@ -4,7 +4,7 @@ use crate::cancellation_ext::{CancellationError, CancellationExt};
 use crate::dispatcher::Dispatcher;
 use axum::routing::post;
 use axum::Router;
-use log::{info, warn};
+use tracing::{info, warn};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
