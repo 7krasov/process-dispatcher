@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: process-supervisor
+  name: process-supervisor-app-deployment
+  labels:
+    app: process-supervisor-app
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: process-supervisor-app
+  template:
+    metadata:
+      labels:
+        app: process-supervisor-app
+        supervisor: "true"
+    spec:
+      serviceAccountName: supervisor
+      imagePullSecrets:
+        - name: 7krasov-docker
+      #      tolerations:
+      #        - effect: NoSchedule
+      #          key: monitoring
+      #          value: "true"
+      containers:
+        - name: supervisor
+          image: 7krasov/process-supervisor.k8s.base:latest
+          command:
+            - /usr/local/bin/process_supervisor
+          # imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
+          # envFrom:
+          #   - configMapRef:
+          #       name: processes-source-storage-config-map
+          env:
+            - name: HTTP_PORT
+              value: "8080"
+            # - name: PROCESS_SUPERVISOR_APP_METRICS_PORT
+            #   value: "2112"
+            # - name: PROCESS_SUPERVISOR_APP_LOG_LEVEL
+            #   value: "debug"
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+            # - containerPort: 2112
+            #   name: metrics
+            #   protocol: TCP
+          resources:
+            limits:
+              cpu: "1"
+              memory: "500Mi"
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+      #termination graceful period starts countdown right after "preStop" hook called. Lets application complete
+      #all stuff and stop working itself. When this period exceeds, the SIGKILL signal is sent
+      terminationGracePeriodSeconds: 60
+      restartPolicy: OnFailure

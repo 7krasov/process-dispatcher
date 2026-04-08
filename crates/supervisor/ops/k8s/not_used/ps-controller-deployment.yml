@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processing-supervisor-controller-deployment
+  namespace: process-supervisor
+  labels:
+    app: process-supervisor-app-controller-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: process-supervisor-app-controller-app
+  template:
+    metadata:
+      labels:
+        app: process-supervisor-app-controller-app
+        controller: "true"
+    spec:
+      serviceAccountName: ps-controller-sa
+      containers:
+        - name: supervisor
+          image: 7krasov/process-supervisor.k8s.base:latest
+          command:
+            - /usr/local/bin/supervisor_controller
+          imagePullPolicy: Always
+          #          env:
+          #            - name: K8S_NAMESPACE
+          #              valueFrom:
+          #                fieldRef:
+          #                  fieldPath: metadata.namespace
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "250m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+      restartPolicy: Always

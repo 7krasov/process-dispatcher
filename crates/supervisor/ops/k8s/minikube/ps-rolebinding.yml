@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: process-supervisor-pod-reader-binding
+  namespace: process-supervisor
+subjects:
+  - kind: ServiceAccount
+    name: supervisor
+    namespace: process-supervisor
+roleRef:
+  kind: Role
+  name: process-supervisor-pod-reader
+  apiGroup: rbac.authorization.k8s.io

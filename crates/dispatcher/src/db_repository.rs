@@ -1,5 +1,5 @@
-use crate::dispatcher::{DispatchState, ProcessingMode};
 use crate::env::EnvParams;
+use shared::{DispatchState, ProcessingMode};
 use futures::Stream;
 use sqlx::types::Uuid;
 use sqlx::{mysql::MySqlPoolOptions, MySqlPool};

@@ -4,16 +4,14 @@ use super::db_repository::DbRepository;
 use crate::async_keyed_mutex::AsyncKeyedMutex;
 use crate::cancellation_ext::CancellationExt;
 use crate::env::EnvParams;
-use crate::responses::AssignedProcess;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use chrono_tz::Tz::UTC;
 pub use error::DispatcherError;
 use futures::stream::TryStreamExt;
 use log::{error, info, trace};
-use serde::{Deserialize, Serialize};
+use shared::{AssignedProcess, DispatchState, ProcessingMode};
 use sqlx::Row;
-use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,6 +23,7 @@ const TIMEZONE: &str = "Europe/Berlin";
 pub struct Dispatcher {
     db_repository: DbRepository,
     source_locks: Arc<AsyncKeyedMutex<u32, tokio::sync::Mutex<()>>>,
+    //TODO: move cancellation_token here and use as dispatcher property
 }
 
 impl Dispatcher {
@@ -104,12 +103,6 @@ impl Dispatcher {
             .await?;
         if process.is_some() {
             let process = process.unwrap();
-            // let state: String = process.try_get("state").expect("unexpected state result");
-            //why Vec<u8>? see https://github.com/launchbadge/sqlx/issues/3387
-            // let state: Vec<u8> = process
-            //     .try_get("state")
-            //     .expect("Unexpected 'state' result value from DB");
-            // let state = String::from_utf8(state).expect("unexpected state result");
             let state: &str = process
                 .try_get("state")
                 .expect("Unexpected 'state' result value from DB");
@@ -124,11 +117,6 @@ impl Dispatcher {
                 );
                 return Ok(());
             }
-
-            // let processing_mode: u8 = process
-            //     .try_get("mode")
-            //     .expect("Unexpected 'mode' result value from DB");
-            // let processing_mode = ProcessingMode::new(processing_mode as isize);
 
             let created_at_string: String = process
                 .try_get("created_at")
@@ -248,61 +236,6 @@ impl Dispatcher {
     }
 }
 
-const DISPATCH_STATE_CREATED: &str = "created";
-const DISPATCH_STATE_PENDING: &str = "pending";
-const DISPATCH_STATE_PROCESSING: &str = "processing";
-const DISPATCH_STATE_ERROR: &str = "error";
-const DISPATCH_STATE_COMPLETED: &str = "completed";
-const DISPATCH_STATE_FAILED: &str = "failed";
-
-#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
-pub enum DispatchState {
-    Created,
-    Pending,
-    Processing,
-    Error,
-    Completed,
-    Failed,
-}
-
-impl DispatchState {
-    pub fn new(value: &str) -> DispatchState {
-        // match value.as_str() {
-        match value {
-            DISPATCH_STATE_CREATED => DispatchState::Created,
-            DISPATCH_STATE_PENDING => DispatchState::Pending,
-            DISPATCH_STATE_PROCESSING => DispatchState::Processing,
-            DISPATCH_STATE_ERROR => DispatchState::Error,
-            DISPATCH_STATE_COMPLETED => DispatchState::Completed,
-            DISPATCH_STATE_FAILED => DispatchState::Failed,
-            _ => panic!("Unexpected DispatchState value"),
-        }
-    }
-
-    pub fn is_finished(&self) -> bool {
-        //if ![DispatchState::Completed, DispatchState::Failed].contains(&self) {}
-        //
-        // match self {
-        //     DispatchState::Completed | DispatchState::Failed => true,
-        //     _ => false,
-        // }
-        matches!(self, DispatchState::Completed | DispatchState::Failed)
-    }
-}
-
-impl Display for DispatchState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DispatchState::Created => write!(f, "{}", DISPATCH_STATE_CREATED),
-            DispatchState::Pending => write!(f, "{}", DISPATCH_STATE_PENDING),
-            DispatchState::Processing => write!(f, "{}", DISPATCH_STATE_PROCESSING),
-            DispatchState::Error => write!(f, "{}", DISPATCH_STATE_ERROR),
-            DispatchState::Completed => write!(f, "{}", DISPATCH_STATE_COMPLETED),
-            DispatchState::Failed => write!(f, "{}", DISPATCH_STATE_FAILED),
-        }
-    }
-}
-
 struct DispatchTimeFormatter;
 
 impl DispatchTimeFormatter {
@@ -321,39 +254,5 @@ impl DispatchTimeFormatter {
 
     fn timezone() -> Tz {
         Tz::from_str(TIMEZONE).expect("invalid timezone")
-    }
-}
-
-const PROCESSING_MODE_REGULAR: isize = 1;
-const PROCESSING_MODE_SANDBOX: isize = 2;
-
-#[derive(PartialEq, Serialize, Deserialize, Debug)]
-pub enum ProcessingMode {
-    Regular = PROCESSING_MODE_REGULAR,
-    Sandbox = PROCESSING_MODE_SANDBOX,
-}
-
-impl ProcessingMode {
-    pub fn new(value: isize) -> ProcessingMode {
-        match value {
-            PROCESSING_MODE_REGULAR => ProcessingMode::Regular,
-            PROCESSING_MODE_SANDBOX => ProcessingMode::Sandbox,
-            _ => panic!("Unexpected ProcessingMode value"),
-        }
-    }
-}
-
-impl From<ProcessingMode> for u8 {
-    fn from(processing_mode: ProcessingMode) -> Self {
-        processing_mode as u8
-    }
-}
-
-impl Display for ProcessingMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProcessingMode::Regular => write!(f, "Regular"),
-            ProcessingMode::Sandbox => write!(f, "Sandbox"),
-        }
     }
 }

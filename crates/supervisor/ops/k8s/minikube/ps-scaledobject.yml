@@ -1,0 +1,21 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: process-supervisor-scaledobject
+  namespace: process-supervisor
+spec:
+  scaleTargetRef:
+    name: process-supervisor-app-deployment
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  cooldownPeriod: 300
+  pollingInterval: 30
+  triggers:
+    - type: prometheus
+      metadata:
+        #        serverAddress: http://prometheus-operated.prometheus:9090/prometheus
+        serverAddress: http://prometheus-operated.monitoring:9090
+        metricName: ps_loaded_workers_percentage
+        threshold: '80'
+        #100 * ps_workers_count/ps_max_worker_count
+        query: 100 * (sum(ps_workers_count{pod=~"process-supervisor-app-deployment-.*", job="process-supervisor/process-supervisor-monitoring"})/(sum(ps_max_worker_count{pod=~"process-supervisor-app-deployment-.*", job="process-supervisor/process-supervisor-monitoring"})))

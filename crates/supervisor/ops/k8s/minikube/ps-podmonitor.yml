@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: process-supervisor-monitoring
+  namespace: process-supervisor
+  labels:
+    app: process-supervisor-app
+spec:
+  selector:
+    matchLabels:
+      app: process-supervisor-app
+  namespaceSelector:
+    matchNames:
+      - process-supervisor
+  podMetricsEndpoints:
+    - path: /metrics
+      port: 'metrics'
+      interval: 1s

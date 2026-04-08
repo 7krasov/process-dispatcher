@@ -44,6 +44,6 @@ exec-mysql-client:
 	mysql -h 127.0.0.1 -P 13306 -u root -ppassword
 
 run:
-	cargo run
+	cargo run --bin process_dispatcher
 
 
