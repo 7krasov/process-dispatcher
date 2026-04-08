@@ -9,11 +9,11 @@ use chrono_tz::Tz;
 use chrono_tz::Tz::UTC;
 pub use error::DispatcherError;
 use futures::stream::TryStreamExt;
-use tracing::{error, info, trace};
 use shared::{AssignedProcess, DispatchState, ProcessingMode};
 use sqlx::mysql::MySqlRow;
 use sqlx::Row;
 use std::str::FromStr;
+use tracing::{error, info, trace};
 
 /// Workaround for sqlx treating VARCHAR columns as VARBINARY under utf8mb4_bin collation.
 trait MySqlRowExt {
@@ -25,8 +25,7 @@ impl MySqlRowExt for MySqlRow {
         let bytes: Vec<u8> = self
             .try_get(column)
             .unwrap_or_else(|e| panic!("Unexpected '{column}' result from DB: {e}"));
-        String::from_utf8(bytes)
-            .unwrap_or_else(|_| panic!("Invalid UTF-8 in '{column}'"))
+        String::from_utf8(bytes).unwrap_or_else(|_| panic!("Invalid UTF-8 in '{column}'"))
     }
 }
 use std::sync::Arc;
@@ -66,9 +65,10 @@ impl Dispatcher {
     pub async fn prepare_schedule(
         &self,
         cancellation_token: &CancellationToken,
-    ) -> Result<(), DispatcherError> {
+    ) -> Result<u16, DispatcherError> {
         info!("Preparing schedule...");
 
+        let mut created_cnt: u16 = 0;
         //requesting a stream (sending a request to DB without waiting for the response)
         let mut source_ids_to_process = self
             .db_repository
@@ -95,18 +95,20 @@ impl Dispatcher {
             let res = self.process_source(source_id, cancellation_token).await;
             if let Err(e) = res {
                 error!("Error processing source id {}: {}", source_id, e);
+            } else {
+                created_cnt += res.unwrap();
             }
             drop(lock);
         }
 
-        Ok(())
+        Ok(created_cnt)
     }
 
     async fn process_source(
         &self,
         source_id: u32,
         cancellation_token: &CancellationToken,
-    ) -> Result<(), DispatcherError> {
+    ) -> Result<u16, DispatcherError> {
         //searching for potential not finished processes
         let process = self
             .db_repository
@@ -127,10 +129,11 @@ impl Dispatcher {
                     state,
                     source_id
                 );
-                return Ok(());
+                return Ok(0);
             }
 
-            let created_at = DispatchTimeFormatter::db_to_dt(&process.get_string("created_at"), None);
+            let created_at =
+                DispatchTimeFormatter::db_to_dt(&process.get_string("created_at"), None);
             let now = DispatchTimeFormatter::now_dt();
 
             if now.date_naive() == created_at.date_naive() {
@@ -138,7 +141,7 @@ impl Dispatcher {
                         "There is already present a finished/failed process for today for source id: {} and date: {}",
                         source_id, now.date_naive()
                     );
-                return Ok(());
+                return Ok(0);
             }
         }
 
@@ -155,7 +158,7 @@ impl Dispatcher {
             "A new regular process {} for source id: {} has been created",
             uuid, source_id
         );
-        Ok(())
+        Ok(1)
     }
 
     pub async fn assign_process(

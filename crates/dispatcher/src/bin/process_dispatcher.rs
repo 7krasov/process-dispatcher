@@ -3,6 +3,7 @@ use process_dispatcher::http_server::start_http_server;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::signal::unix::SignalKind;
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -31,7 +32,12 @@ async fn main() {
                 .prepare_schedule(&cancellation_token_clone)
                 .await
             {
-                Ok(_) => info!("Cycle completed successfully"),
+                Ok(created_cnt) => {
+                    info!("Cycle completed successfully");
+                    if created_cnt == 0 {
+                        sleep(std::time::Duration::from_secs(60)).await;
+                    }
+                }
                 Err(process_dispatcher::dispatcher::DispatcherError::TerminatingSignalReceived) => {
                     info!("main:schedule_thread: Schedule preparation cancelled");
                     break;
