@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
+use tracing::trace;
 
 //"launch" route
 #[derive(Debug, Clone)]
@@ -78,26 +79,13 @@ impl Handleable for GetStateList {
         supervisor_arc: Arc<RwLock<Supervisor>>,
     ) -> Result<Response<Full<Bytes>>, Error> {
         let before_time = Instant::now();
-        println!(
-            "GetStateList: before supervisor_clone: {:?}",
-            Instant::now().duration_since(before_time)
-        );
         let supervisor_arc_clone = {
-            println!(
-                "GetStateList: before read lock: {:?}",
-                Instant::now().duration_since(before_time)
-            );
+            trace!(elapsed = ?Instant::now().duration_since(before_time), "GetStateList: before read lock");
             let supervisor_guard = supervisor_arc.read().await;
-            println!(
-                "GetStateList: after read lock: {:?}",
-                Instant::now().duration_since(before_time)
-            );
+            trace!(elapsed = ?Instant::now().duration_since(before_time), "GetStateList: after read lock");
             Arc::new(supervisor_guard.clone())
         };
-        println!(
-            "GetStateList: after supervisor_clone: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "GetStateList: after supervisor clone");
 
         let processes = supervisor_arc_clone.get_state_list().await;
         let json_message = serde_json::to_string(&processes).unwrap();
@@ -119,7 +107,6 @@ impl Handleable for Route404 {
     fn clone_box(&self) -> Box<dyn Handleable> {
         Box::new(self.clone())
     }
-    // async fn handle_data(&self, body: String) -> Result<Response<Full<Bytes>>, Error> {
     async fn handle_data(
         &self,
         _route_req_params: HashMap<String, String>,

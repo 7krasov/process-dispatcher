@@ -1,5 +1,6 @@
 use crate::dispatcher::{DEFAULT_OBTAIN_PROCESS_URL, DEFAULT_REPORT_PROCESS_FINISH_URL};
 use std::env;
+use tracing::warn;
 
 pub struct EnvParams {
     http_port: u16,
@@ -38,7 +39,7 @@ pub fn fetch_env_params() -> EnvParams {
     let http_port: u16 = match env::var("HTTP_PORT") {
         Ok(port) => port.parse::<u16>().unwrap(),
         Err(_) => {
-            println!("HTTP_PORT is not set. Using default 8080");
+            warn!("HTTP_PORT is not set. Using default 8080");
             8080
         }
     };
@@ -46,7 +47,7 @@ pub fn fetch_env_params() -> EnvParams {
     let sigterm_timeout_secs: u64 = match env::var("SIGTERM_TIMEOUT_SECS") {
         Ok(timeout) => timeout.parse::<u64>().unwrap(),
         Err(_) => {
-            println!("SIGTERM_TIMEOUT_SECS is not set. Using default 20");
+            warn!("SIGTERM_TIMEOUT_SECS is not set. Using default 20");
             20
         }
     };
@@ -54,13 +55,13 @@ pub fn fetch_env_params() -> EnvParams {
     let max_children_count: usize = match env::var("MAX_CHILDREN_COUNT") {
         Ok(count) => count.parse::<usize>().unwrap(),
         Err(_) => {
-            println!("MAX_CHILDREN_COUNT is not set. Using default 10");
+            warn!("MAX_CHILDREN_COUNT is not set. Using default 10");
             10
         }
     };
 
     let obtain_process_url: String = env::var("OBTAIN_PROCESS_URL").unwrap_or_else(|_| {
-        println!(
+        warn!(
             "OBTAIN_PROCESS_URL is not set. Using default {}",
             DEFAULT_OBTAIN_PROCESS_URL
         );
@@ -69,7 +70,7 @@ pub fn fetch_env_params() -> EnvParams {
 
     let report_process_finish_url: String =
         env::var("REPORT_PROCESS_FINISH_URL").unwrap_or_else(|_| {
-            println!(
+            warn!(
                 "REPORT_PROCESS_FINISH_URL is not set. Using default {}",
                 DEFAULT_REPORT_PROCESS_FINISH_URL
             );

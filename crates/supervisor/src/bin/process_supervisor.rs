@@ -9,9 +9,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+use tracing::{error, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    init_tracing();
+
     //obtain environment parameters
     let env_params = fetch_env_params();
     //obtain k8s parameters
@@ -32,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     //run the k8s cycle if we're within Kubernetes
     if k8s_params.is_some() {
-        println!("Kubernetes parameters are available, proceeding with k8s cycle.");
+        info!("Kubernetes parameters are available, proceeding with k8s cycle");
         start_k8s_cycle(
             supervisor_arc.clone(),
             //send just a copy
@@ -41,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .await;
     } else {
-        println!("Running outside Kubernetes, skipping k8s cycle.");
+        info!("Running outside Kubernetes, skipping k8s cycle");
     }
 
     //preparing a task to:
@@ -69,22 +72,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     drop(sv_g);
                     if let Err(SlotsPopulationError::DrainModeObtained) = result {
                         is_drain_mode = true;
-                        println!("Drain mode is caught. Will not populate anymore");
+                        warn!("Drain mode is caught. Will not populate anymore");
                         continue;
                     }
                 } else if working_processes_cnt == 0 {
                     //terminate supervisor pod if is_drain_mode and there are no any working processes left
                     let res = mark_itself_as_finished(Arc::clone(&k8s_params_arc)).await;
                     if res.is_err() {
-                        println!("Unable to mark pod as finished: {:?}", res.err());
-                        // tokio::time::sleep(Duration::from_secs(5)).await;
-                        // continue;
+                        error!(err = ?res.err(), "Unable to mark pod as finished");
                     }
 
                     //remove finalizer from the pod so it can be deleted by Kubernetes
                     remove_supervisor_finalizer(Arc::clone(&k8s_params_arc)).await;
 
-                    println!("Terminating supervisor pod...");
+                    info!("Terminating supervisor pod...");
                     std::process::exit(0);
                 }
             }
@@ -95,4 +96,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let addr: SocketAddr = ([0, 0, 0, 0], env_params.http_port()).into();
     start_http_server(addr, supervisor_arc).await
+}
+
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::try_from_env("RUST_LOG").unwrap_or_else(|_| EnvFilter::new("trace"));
+
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 }

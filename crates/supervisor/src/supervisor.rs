@@ -17,6 +17,7 @@ use std::time::SystemTime;
 use tokio::sync::RwLock;
 use tokio::task;
 use tokio::time::{sleep, sleep_until, Duration, Instant};
+use tracing::{debug, error, info, trace, warn};
 
 mod results;
 
@@ -84,7 +85,6 @@ impl Supervisor {
                 result
             }
             Err(e) => {
-                // println!("Failed to start command");
                 result.set_error(e.to_string());
                 result
             }
@@ -100,10 +100,7 @@ impl Supervisor {
         //extract child PID from the processes
         let child = processes_guard.get_mut(&id);
 
-        println!(
-            "terminate: After getting of child from the process list time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "terminate: after getting child from process list");
 
         let mut result = TerminateResult::new();
         if child.is_none() {
@@ -115,17 +112,11 @@ impl Supervisor {
 
         drop(processes_guard);
 
-        println!(
-            "terminate: After dropping time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "terminate: after dropping guard");
 
-        println!("terminate: Sending SIGTERM to PID: {}", pid);
+        info!(pid, "terminate: sending SIGTERM");
         let signal_result = signal::kill(Pid::from_raw(pid), signal::SIGTERM);
-        println!(
-            "terminate: After SIGTERM sending: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "terminate: after SIGTERM sending");
 
         match signal_result {
             Ok(_) => {
@@ -156,10 +147,7 @@ impl Supervisor {
         //extract child PID from the processes
         let child = processes_guard.get_mut(&id);
 
-        println!(
-            "kill: After getting of child from the process list time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after getting child from process list");
 
         if child.is_none() {
             let mut result = OldKillResult::new();
@@ -171,42 +159,23 @@ impl Supervisor {
 
         drop(processes_guard);
 
-        println!(
-            "kill: After dropping time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after dropping guard");
 
-        println!("kill: Sending SIGTERM to PID: {}", pid);
+        info!(pid, "kill: sending SIGTERM");
         signal::kill(Pid::from_raw(pid), signal::SIGTERM).unwrap();
-        println!(
-            "kill: After SIGTERM sending: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after SIGTERM sending");
         let duration = Duration::from_secs(self.sig_term_timeout);
         let deadline = Instant::now() + duration;
-        println!("kill: Sleeping until: {:?}", deadline);
+        trace!(?deadline, "kill: sleeping until deadline");
         sleep_until(deadline).await;
-        println!(
-            "kill: After sleep_until awaiting: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after sleep_until");
 
         let mut result = OldKillResult::new();
         //after SIGTERM timeout we should send SIGKILL signal to make sure the process will be terminated
         let processes_arc = self.processes.clone();
-        println!(
-            "kill: After new processes_arc cloning: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after processes_arc cloning");
         let mut processes_guard = processes_arc.write().await;
-        println!(
-            "kill: After new processes_guard awaiting: {:?}",
-            Instant::now().duration_since(before_time)
-        );
-        println!(
-            "kill: After new result_guard awaiting: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after processes_guard awaiting");
         //extract child PID from the processes
         let child = processes_guard.get_mut(&id);
         if child.is_none() {
@@ -216,28 +185,19 @@ impl Supervisor {
         let child = child.unwrap();
 
         //send SIGKILL (9) signal
-        println!("Sending SIGKILL to PID: {}", pid);
+        info!(pid, "Sending SIGKILL");
         let kill_result = child.kill();
-        println!(
-            "After kill time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "after kill");
 
         match kill_result {
             Ok(_) => {
                 let exit_status = child.try_wait();
-                println!(
-                    "kill: After try_wait time: {:?}",
-                    Instant::now().duration_since(before_time)
-                );
+                trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after try_wait");
 
                 let ch = processes_guard.remove(&id);
-                println!(
-                    "After remove time: {:?}",
-                    Instant::now().duration_since(before_time)
-                );
+                trace!(elapsed = ?Instant::now().duration_since(before_time), "after remove");
                 if ch.is_none() {
-                    println!("Failed to remove child {} from processes", id);
+                    warn!(id, "Failed to remove child from processes");
                 }
                 drop(processes_guard);
 
@@ -245,7 +205,7 @@ impl Supervisor {
                     Ok(status) => {
                         match status {
                             Some(_) => {
-                                println!("Status code; {:?}", status.unwrap().code());
+                                debug!(exit_code = ?status.unwrap().code(), "Process exit status");
                                 result.set_success(status.unwrap().code());
                             }
                             None => {
@@ -255,7 +215,7 @@ impl Supervisor {
                         };
                     }
                     Err(e) => {
-                        println!("Error: {}", e);
+                        error!(%e, "Error getting exit status");
                         result.set_error(e.to_string());
                     }
                 }
@@ -276,11 +236,10 @@ impl Supervisor {
             - terminate_signal_time;
 
         if wait_time_elapsed < self.sig_term_timeout {
-            println!("There is some time left before SIGKILL sending. Sleeping...");
             let sleep_time = self.sig_term_timeout - wait_time_elapsed;
-            println!("kill: Sleeping seconds: {:?}", sleep_time);
+            debug!(sleep_time, "Time left before SIGKILL, sleeping...");
             sleep(Duration::from_secs(sleep_time)).await;
-            println!("kill: After sleep awaiting: {:?}", now.elapsed());
+            trace!(elapsed = ?now.elapsed(), "kill: after sleep");
         }
 
         let before_time = Instant::now();
@@ -288,15 +247,9 @@ impl Supervisor {
         let mut result = KillResult::new();
         //after SIGTERM timeout we should send SIGKILL signal to make sure the process will be terminated
         let processes_arc = self.processes.clone();
-        println!(
-            "kill: After new processes_arc cloning: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after processes_arc cloning");
         let mut processes_guard = processes_arc.write().await;
-        println!(
-            "kill: After new processes_guard awaiting: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after processes_guard awaiting");
         //extract child PID from the processes
         let child = processes_guard.get_mut(&id);
         if child.is_none() {
@@ -307,55 +260,27 @@ impl Supervisor {
 
         let state = get_child_state(id.clone(), child).unwrap();
         if state.is_finished {
-            println!(
-                "It seems the process finished itself. Exit code: {:?}",
-                state.exit_code
-            );
+            info!(id, exit_code = ?state.exit_code, "Process finished itself before SIGKILL");
             result.set_success(state.exit_code);
-            //we use process_states() to clean up the processes list
-            // let ch = processes_guard.remove(&id);
-            // println!(
-            //     "After child remove time: {:?}",
-            //     Instant::now().duration_since(before_time)
-            // );
-            // if ch.is_none() {
-            //     println!("Failed to remove child for process {}", id);
-            // }
             return result;
         }
 
         //send SIGKILL (9) signal
-        println!("Sending SIGKILL to PID: {}", child.id());
+        let child_pid = child.id();
+        info!(pid = child_pid, "Sending SIGKILL");
         let kill_result = child.kill();
-        println!(
-            "After kill time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "after kill");
 
         match kill_result {
             Ok(_) => {
                 let exit_status = child.try_wait();
-                println!(
-                    "kill: After try_wait time: {:?}",
-                    Instant::now().duration_since(before_time)
-                );
-
-                //we use process_states() to clean up the processes list
-                // let ch = processes_guard.remove(&id);
-                // println!(
-                //     "After child remove time: {:?}",
-                //     Instant::now().duration_since(before_time)
-                // );
-                // if ch.is_none() {
-                //     println!("Failed to remove child for processes {}", id);
-                // }
-                // drop(processes_guard);
+                trace!(elapsed = ?Instant::now().duration_since(before_time), "kill: after try_wait");
 
                 match exit_status {
                     Ok(status) => {
                         match status {
                             Some(_) => {
-                                println!("Status code; {:?}", status.unwrap().code());
+                                debug!(exit_code = ?status.unwrap().code(), "Process exit status");
                                 result.set_success(status.unwrap().code());
                             }
                             None => {
@@ -365,7 +290,7 @@ impl Supervisor {
                         };
                     }
                     Err(e) => {
-                        println!("Error: {}", e);
+                        error!(%e, "Error getting exit status");
                         result.set_error(e.to_string());
                     }
                 };
@@ -380,20 +305,9 @@ impl Supervisor {
 
     pub async fn get_state_list(self: Arc<Self>) -> HashMap<String, ChildState> {
         let before_time = Instant::now();
-        println!(
-            "get_state_list: Before self.processes.clone(), time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
         let processes_arc = self.processes.clone();
-        println!(
-            "get_state_list: After self.processes.clone(), time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
         let processes_guard = processes_arc.read().await;
-        println!(
-            "get_state_list: After processes_arc.read().await, time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "get_state_list: after read lock");
         let keys: Vec<String> = processes_guard.keys().cloned().collect();
         drop(processes_guard);
 
@@ -404,7 +318,7 @@ impl Supervisor {
                 task::spawn(async move {
                     let res = supervisor.get_process_state(id.clone()).await;
                     res.unwrap_or_else(|e| {
-                        println!("get_child_state returned error: {}", e);
+                        error!(%e, "get_child_state returned error");
                         ChildState {
                             id: id.clone(),
                             is_running: false,
@@ -418,61 +332,33 @@ impl Supervisor {
             })
             .collect();
 
-        println!(
-            "get_state_list: After futures collect, time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "get_state_list: after futures collect");
 
         let mut states = HashMap::new();
         for future in futures {
             match future.await {
                 Ok(state) => {
-                    println!(
-                        "get_state_list: Before states.insert, time: {:?}",
-                        Instant::now().duration_since(before_time)
-                    );
+                    trace!(elapsed = ?Instant::now().duration_since(before_time), "get_state_list: before states.insert");
                     states.insert(state.id.clone(), state);
                 }
                 Err(e) => {
-                    println!("get_state_list: Task Join Error: {}", e);
+                    error!(%e, "get_state_list: task join error");
                 }
             }
         }
 
         states
-
-        // return processes_guard.keys().map(|source_id| {
-        //     self.get_child_state(*source_id).await;
-        // }).collect();
-        // let keys = processes_guard.keys();
-        // return keys.map(|(source_id)| {
-        //     self.get_child_state(*source_id).unwrap()
-        // }).collect();
     }
 
     pub async fn get_process_state(&self, id: String) -> Result<ChildState, Error> {
         let before_time = Instant::now();
-        println!(
-            "get_process_state: Before self.processes.clone(), time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
         let processes_arc = self.processes.clone();
-        println!(
-            "get_process_state: After self.processes.clone(), time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
         let mut processes_guard = processes_arc.write().await;
-        println!(
-            "get_process_state: After processes_arc.write().await, time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "get_process_state: after write lock");
         let child = processes_guard
             .get_mut(&id)
             .ok_or_else(|| Error::new(std::io::ErrorKind::NotFound, "Child not found"))?;
-        println!(
-            "get_process_state: After processes_guard.get_mut, time: {:?}",
-            Instant::now().duration_since(before_time)
-        );
+        trace!(elapsed = ?Instant::now().duration_since(before_time), "get_process_state: after get_mut");
 
         get_child_state(id, child)
     }
@@ -494,13 +380,12 @@ impl Supervisor {
             .next()
             .map(|(k, v)| (k.clone(), *v))?;
         kill_queue_guard.remove(&id);
-        // drop(kill_queue_guard);
         Some((id, terminate_signal_time))
     }
 
     //cleans up the processes list from finished processes and returns the number of processes left
     pub async fn process_states(&self) -> usize {
-        println!("Processing child states...");
+        debug!("Processing child states...");
         let ps_arc = self.processes.clone();
 
         let ps_g = ps_arc.read().await;
@@ -513,7 +398,7 @@ impl Supervisor {
             let child = ps_g.get_mut(&id);
             if child.is_none() {
                 working_processes_cnt -= 1;
-                println!("Child {} not found in the process list", id.clone());
+                warn!(id, "Child not found in the process list");
                 drop(ps_g);
                 continue;
             }
@@ -521,19 +406,20 @@ impl Supervisor {
             let state = get_child_state(id.clone(), child.unwrap());
             drop(ps_g);
             if state.is_err() {
-                println!("Error getting child state: {}", state.err().unwrap());
+                error!(err = %state.err().unwrap(), "Error getting child state");
                 continue;
             }
             let state = state.unwrap();
 
             if !state.is_finished {
-                println!("Process {} is still running.", id);
+                debug!(id, "Process is still running");
                 continue;
             }
 
-            println!(
-                "Process {} finished with exit code: {:?}. Reporting to the dispatcher...",
-                id, state.exit_code
+            info!(
+                id,
+                exit_code = ?state.exit_code,
+                "Process finished. Reporting to the dispatcher..."
             );
             let exit_code = state.exit_code.unwrap_or(0);
             //TODO: report kill status to dispatcher
@@ -544,24 +430,24 @@ impl Supervisor {
             let report = dispatcher::ProcessFinishReport::new(id.clone(), process_result);
             let report_result = self.dispatcher_client.report_process_finish(report).await;
             if report_result.is_err() {
-                println!("Failed to report process finish: {:?}", report_result.err());
+                error!(err = ?report_result.err(), "Failed to report process finish");
                 tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                 continue;
             }
-            println!("Process {:?} finish reported successfully. Removing...", id);
+            info!(id, "Process finish reported successfully. Removing...");
             let mut ps_g = ps_arc.write().await;
             ps_g.remove(&id);
             working_processes_cnt -= 1;
             drop(ps_g);
-            println!("Process {:?} removed successfully.", id);
+            debug!(id, "Process removed successfully");
         }
-        println!("Child states processing is finished.");
+        debug!("Child states processing is finished");
         working_processes_cnt
     }
 
     ///if empty processed slots exist, fetches new processes from dispatcher and run them
     pub async fn populate_empty_slots(&self) -> Result<(), SlotsPopulationError> {
-        println!("Populating empty slots...");
+        debug!("Populating empty slots...");
         //check if we are in drain mode
         let is_drain_mode_guard = self.is_drain_mode.read().await;
         if *is_drain_mode_guard {
@@ -574,18 +460,14 @@ impl Supervisor {
         drop(processes_guard);
 
         if processes_count >= self.max_children_count {
-            //all slots are occupied
-            println!("All slots are occupied. Nothing to do.");
+            debug!("All slots are occupied. Nothing to do.");
             return Ok(());
         }
 
-        if processes_count < self.max_children_count {
-            //some slots are empty
-            println!(
-                "Empty slots available: {}. Populating...",
-                self.max_children_count - processes_count
-            );
-        }
+        info!(
+            empty_slots = self.max_children_count - processes_count,
+            "Populating empty slots..."
+        );
 
         for _ in processes_count..self.max_children_count {
             //check if we are in drain mode
@@ -594,30 +476,28 @@ impl Supervisor {
                 return Err(SlotsPopulationError::DrainModeObtained);
             }
 
-            println!("Sleeping...");
+            debug!("Sleeping before obtaining new process...");
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
             let assigned_process = self.dispatcher_client.obtain_new_process().await;
             if assigned_process.is_err() {
-                println!("Failed to obtain new process: {:?}", assigned_process.err());
+                error!(err = ?assigned_process.err(), "Failed to obtain new process");
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 continue;
             }
             let assigned_process = assigned_process.unwrap();
-            // let supervisor = self.clone();
-            // let result = supervisor.launch(new_process.id.clone()).await;
             let result = self.launch(assigned_process.id.clone()).await;
-            // drop(supervisor);
             if result.is_success() {
-                println!(
-                    "Process {:?} for source {:?} launched successfully",
-                    assigned_process.id, assigned_process.source_id
+                info!(
+                    process_id = assigned_process.id,
+                    source_id = assigned_process.source_id,
+                    "Process launched successfully"
                 );
                 continue;
             }
-            println!("Failed to launch child: {:?}", result.error_message());
+            error!(err = ?result.error_message(), "Failed to launch child");
         }
-        println!("Populating empty slots is finished.");
+        debug!("Populating empty slots is finished");
         Ok(())
     }
 
@@ -662,10 +542,7 @@ pub enum SlotsPopulationError {
 fn get_child_state(id: String, child: &mut Child) -> Result<ChildState, Error> {
     let before_time = Instant::now();
     let exit_status = child.try_wait()?;
-    println!(
-        "get_child_state: After child.try_wait()?, time: {:?}",
-        Instant::now().duration_since(before_time)
-    );
+    trace!(elapsed = ?Instant::now().duration_since(before_time), "get_child_state: after try_wait");
     let is_finished = exit_status.is_some();
     let exit_code = exit_status.and_then(|status| status.code());
 

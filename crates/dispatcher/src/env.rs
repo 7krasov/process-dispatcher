@@ -39,8 +39,8 @@ pub fn fetch_env_params() -> EnvParams {
     let http_port: u16 = match env::var("HTTP_PORT") {
         Ok(port) => port.parse::<u16>().unwrap(),
         Err(_) => {
-            println!("HTTP_PORT is not set. Using default 8081");
-            8081
+            println!("HTTP_PORT is not set. Using default 8089");
+            8089
         }
     };
 

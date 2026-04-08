@@ -1,5 +1,6 @@
 use crate::env::EnvParams;
 use serde_derive::Serialize;
+use tracing::{error, info};
 
 pub use shared::AssignedProcess;
 pub use shared::REPORT_STATUS_ERROR;
@@ -47,10 +48,7 @@ impl DispatcherClient {
     pub async fn obtain_new_process(
         &self,
     ) -> Result<AssignedProcess, ProcessDispatcherClientError> {
-        println!(
-            "Obtaining new process for supervisor: {}...",
-            self.supervisor_id
-        );
+        info!(supervisor_id = %self.supervisor_id, "Obtaining new process...");
         let resp = get_request_client()
             .get(
                 self.obtain_process_url
@@ -78,7 +76,7 @@ impl DispatcherClient {
 
         if process_result.is_err() {
             let err = process_result.err().unwrap();
-            println!("Failed to parse response: {:?}. Data: {:?}", err, resp_text);
+            error!(?err, resp_text, "Failed to parse response");
             return Err(ProcessDispatcherClientError::ParseError(format!(
                 "Failed to parse response: {:?}",
                 err,
@@ -92,7 +90,7 @@ impl DispatcherClient {
         &self,
         report: ProcessFinishReport,
     ) -> Result<(), ProcessDispatcherClientError> {
-        println!("Sending process finish report: {:?}...", report);
+        info!(?report, "Sending process finish report...");
         let url = self
             .report_process_finish_url
             .replace("{process_id}", &report.process_id);

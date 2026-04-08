@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::RwLock;
+use tracing::{error, info, warn};
 
 struct ReconcileContext {
     pods: Arc<Api<Pod>>,
@@ -29,14 +30,8 @@ enum ReconcileError {
 
 pub async fn start_k8s_cycle(
     supervisor_arc: Arc<RwLock<Supervisor>>,
-    // k8s_params: Arc<K8sParams>,
     k8s_params: Arc<K8sParams>,
-    // pod_name: String,
 ) {
-    //start listening pod events and reacting on them:
-    //add finalizer on the first run, don't allow k8s to delete the pod until the supervisor will finish itself
-    //accept deletion, switch to drain mode
-    //accept termination, switch to terminate mode
     start_controller(
         Arc::clone(&k8s_params),
         Some(format!("metadata.name={}", k8s_params.get_pod_name())),
@@ -46,10 +41,7 @@ pub async fn start_k8s_cycle(
 }
 
 pub async fn remove_supervisor_finalizer(k8s_params: Arc<&K8sParams>) {
-    println!(
-        "Removing finalizer from pod {}...",
-        k8s_params.get_pod_name()
-    );
+    info!(pod = %k8s_params.get_pod_name(), "Removing finalizer from pod...");
     let pod_api: Api<Pod> =
         Api::namespaced(k8s_params.get_client(), k8s_params.get_namespace().as_ref()).clone();
 
@@ -68,26 +60,18 @@ pub async fn remove_supervisor_finalizer(k8s_params: Arc<&K8sParams>) {
         .await;
     match res {
         Ok(_) => {
-            println!(
-                "Pod {} finalizer has been removed",
-                k8s_params.get_pod_name()
-            );
+            info!(pod = %k8s_params.get_pod_name(), "Pod finalizer has been removed");
         }
         Err(e) => {
-            println!(
-                "Failed to remove a finalizer for pod {}: {}",
-                k8s_params.get_pod_name(),
-                e
-            );
+            error!(pod = %k8s_params.get_pod_name(), %e, "Failed to remove finalizer");
         }
     }
 }
 
 pub async fn mark_itself_as_finished(
     k8s_params: Arc<&K8sParams>,
-    // pod_name: &str,
 ) -> Result<(), anyhow::Error> {
-    println!("Marking pod as finished");
+    info!("Marking pod as finished");
 
     let patch = serde_json::json!({
         "metadata": {
@@ -113,7 +97,7 @@ pub async fn mark_itself_as_finished(
 }
 
 async fn reconcile(pod: Arc<Pod>, ctx: Arc<ReconcileContext>) -> Result<Action, ReconcileError> {
-    println!("Reconciling...");
+    info!("Reconciling...");
     let name = pod.name_any();
 
     let metadata = &pod.metadata;
@@ -123,7 +107,7 @@ async fn reconcile(pod: Arc<Pod>, ctx: Arc<ReconcileContext>) -> Result<Action, 
     if metadata.deletion_timestamp.is_none() && !finalizers.contains(&FINALIZER_NAME.to_string()) {
         let res = add_finalizer(ctx, &name, finalizers).await;
         if let Err(ReconcileError::KubeError(e)) = res {
-            println!("Failed to add finalizer to pod {}: {}", name, e);
+            error!(pod = %name, %e, "Failed to add finalizer");
             return Err(ReconcileError::KubeError(e));
         }
         return Ok(Action::await_change());
@@ -134,10 +118,7 @@ async fn reconcile(pod: Arc<Pod>, ctx: Arc<ReconcileContext>) -> Result<Action, 
     // if a pod is marked to be deleted by k8s, switch to "drain" mode.
     // supervisor will not get new processes and will terminate itself after all processes are finished
     if metadata.deletion_timestamp.is_some() && !annotations.is_drain_mode() {
-        println!(
-            "Pod {} is market to be deleted. Adding drain annotation...",
-            name
-        );
+        info!(pod = %name, "Pod is marked to be deleted. Adding drain annotation...");
         if let Err(err) = add_drain_pod_annotation(&ctx, &name).await {
             return Err(ReconcileError::KubeError(err));
         }
@@ -148,10 +129,7 @@ async fn reconcile(pod: Arc<Pod>, ctx: Arc<ReconcileContext>) -> Result<Action, 
     // on "terminate" annotation a pod should remove finalizer and kill itself without waiting
     // for processes to finish
     if annotations.is_terminate_mode() && !ctx.supervisor.read().await.is_terminate_mode().await {
-        println!(
-            "Pod {} is marked for termination. Setting 'terminate' mode...",
-            name
-        );
+        warn!(pod = %name, "Pod is marked for termination. Setting 'terminate' mode...");
         ctx.supervisor.write().await.set_is_terminate_mode().await;
     }
 
@@ -161,7 +139,7 @@ async fn reconcile(pod: Arc<Pod>, ctx: Arc<ReconcileContext>) -> Result<Action, 
 
 //error processing
 fn error_policy(pod: Arc<Pod>, err: &ReconcileError, _ctx: Arc<ReconcileContext>) -> Action {
-    println!("Error occurred for Pod {}: {}", pod.name_any(), err);
+    error!(pod = %pod.name_any(), %err, "Reconcile error");
     Action::requeue(Duration::from_secs(10)) //try again after some delay
 }
 
@@ -170,7 +148,7 @@ async fn start_controller(
     field_selector: Option<String>,
     supervisor: Arc<RwLock<Supervisor>>,
 ) {
-    println!("Starting supervisor pod controller...");
+    info!("Starting supervisor pod controller...");
 
     let pod_api =
         Api::namespaced(k8s_params.get_client(), k8s_params.get_namespace().as_ref()).clone();
@@ -179,8 +157,6 @@ async fn start_controller(
     let ctrl = Controller::new(
         pod_api.clone(),
         watcher::Config {
-            // label_selector: Some("supervisor=true".to_string()),
-            // field_selector: Some(format!("metadata.name={}", get_current_pod_name().unwrap())),
             field_selector,
             ..watcher::Config::default()
         },
@@ -201,14 +177,14 @@ async fn start_controller(
     .for_each(|event| async {
         match event {
             Ok(obj) => {
-                println!(
-                    "Reconcile triggered for pod: {}/{}",
-                    obj.0.namespace.as_deref().unwrap_or("<no-ns>"),
-                    obj.0.name
+                info!(
+                    namespace = obj.0.namespace.as_deref().unwrap_or("<no-ns>"),
+                    pod = %obj.0.name,
+                    "Reconcile triggered"
                 );
             }
             Err(e) => {
-                println!("Controller error: {:?}", e);
+                error!(?e, "Controller error");
             }
         }
     })
@@ -237,7 +213,7 @@ async fn add_finalizer(
     pod_name: &String,
     finalizers: Vec<String>,
 ) -> Result<(), ReconcileError> {
-    println!("Adding finalizer to pod {}", pod_name);
+    info!(pod = %pod_name, "Adding finalizer");
     let patch = json!({
         "metadata": {
             "finalizers": finalizers
@@ -257,11 +233,11 @@ async fn add_finalizer(
         .await;
     match res {
         Ok(_) => {
-            println!("Finalizer added to pod {}", pod_name);
+            info!(pod = %pod_name, "Finalizer added");
             Ok(())
         }
         Err(e) => {
-            println!("Failed to add finalizer to pod {}: {}", pod_name, e);
+            error!(pod = %pod_name, %e, "Failed to add finalizer");
             Err(ReconcileError::KubeError(e))
         }
     }
