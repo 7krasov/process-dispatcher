@@ -20,7 +20,7 @@ async fn main() {
     let arc_dispatcher = Arc::new(dispatcher);
 
     //use cleaning of the lock mechanism for source ids
-    arc_dispatcher.clone().start_clean_source_locks().await;
+    arc_dispatcher.clone().start_clean_source_locks();
 
     //prepare continuous scheduling of processes
     let dispatcher_arc_clone = arc_dispatcher.clone();

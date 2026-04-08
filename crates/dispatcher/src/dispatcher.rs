@@ -11,8 +11,24 @@ pub use error::DispatcherError;
 use futures::stream::TryStreamExt;
 use log::{error, info, trace};
 use shared::{AssignedProcess, DispatchState, ProcessingMode};
+use sqlx::mysql::MySqlRow;
 use sqlx::Row;
 use std::str::FromStr;
+
+/// Workaround for sqlx treating VARCHAR columns as VARBINARY under utf8mb4_bin collation.
+trait MySqlRowExt {
+    fn get_string(&self, column: &str) -> String;
+}
+
+impl MySqlRowExt for MySqlRow {
+    fn get_string(&self, column: &str) -> String {
+        let bytes: Vec<u8> = self
+            .try_get(column)
+            .unwrap_or_else(|e| panic!("Unexpected '{column}' result from DB: {e}"));
+        String::from_utf8(bytes)
+            .unwrap_or_else(|_| panic!("Invalid UTF-8 in '{column}'"))
+    }
+}
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -36,16 +52,15 @@ impl Dispatcher {
         })
     }
 
-    pub async fn start_clean_source_locks(&self) {
+    pub fn start_clean_source_locks(&self) {
         let source_locks = self.source_locks.clone();
-        let _ = tokio::task::spawn(async move {
+        tokio::task::spawn(async move {
             info!("Cleaning locks...");
             loop {
                 source_locks.cleanup();
                 tokio::time::sleep(Duration::from_secs(30)).await;
             }
-        })
-        .await;
+        });
     }
 
     pub async fn prepare_schedule(
@@ -103,10 +118,7 @@ impl Dispatcher {
             .await?;
         if process.is_some() {
             let process = process.unwrap();
-            let state: &str = process
-                .try_get("state")
-                .expect("Unexpected 'state' result value from DB");
-            let state = DispatchState::new(state);
+            let state = DispatchState::new(&process.get_string("state"));
 
             //not: Completed, Failed
             if !state.is_finished() {
@@ -118,11 +130,7 @@ impl Dispatcher {
                 return Ok(());
             }
 
-            let created_at_string: String = process
-                .try_get("created_at")
-                .expect("unexpected 'created_at' result");
-
-            let created_at = DispatchTimeFormatter::db_to_dt(&created_at_string, None);
+            let created_at = DispatchTimeFormatter::db_to_dt(&process.get_string("created_at"), None);
             let now = DispatchTimeFormatter::now_dt();
 
             if now.date_naive() == created_at.date_naive() {
@@ -197,17 +205,12 @@ impl Dispatcher {
                 let supervisor_id_option: Option<Vec<u8>> = process_row
                     .try_get("supervisor_id")
                     .expect("unexpected supervisor id result");
-                let state: &str = process_row
-                    .try_get("state")
-                    .expect("Unexpected 'state' result value from DB");
-                let state = DispatchState::new(state);
+                let state = DispatchState::new(&process_row.get_string("state"));
                 let processing_mode: u8 = process_row
                     .try_get("mode")
                     .expect("Unexpected 'mode' result value from DB");
                 let processing_mode = ProcessingMode::new(processing_mode as isize);
-                let created_at_string: String = process_row
-                    .try_get("created_at")
-                    .expect("unexpected 'created_at' result");
+                let created_at_string = process_row.get_string("created_at");
                 let created_at = DispatchTimeFormatter::db_to_dt(&created_at_string, Some(UTC));
 
                 //we should get only active and unassigned process

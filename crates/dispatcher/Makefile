@@ -4,12 +4,12 @@ export $(shell sed 's/=.*//' .env)
 
 
 #MYSQL_STRING := "mysql://root:password@10.97.212.193:13306/process_dispatcher"
-MYSQL_STRING := "mysql://root:password@127.0.0.1:3306/process_dispatcher"
+MYSQL_STRING := "mysql://root:password@127.0.0.1:13306/process_dispatcher"
 MIGRATION_PATH := "./db/migrations"
 NEW_MIGRATION_NAME := "new_migration"
 
 #MVP_MYSQL_STRING := "mysql://root:password@10.97.212.193:13306/mvp"
-MVP_MYSQL_STRING := "mysql://root:password@127.0.0.1:3306/mvp"
+MVP_MYSQL_STRING := "mysql://root:password@127.0.0.1:1	3306/mvp"
 MVP_MIGRATION_PATH := "./db/mvp_migrations"
 MVP_NEW_MIGRATION_NAME := "sources"
 
