@@ -1,5 +1,4 @@
-FROM rust:1.89.0
-RUN apt update && apt install procps net-tools -y
-#RUN mkdir -p /var/app
-#WORKDIR /var/app
-#CMD [ "/var/app/process-supervisor" ]
+FROM php:8.3-cli
+RUN apt update && apt install libssl-dev procps net-tools -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.89 -y
+ENV PATH="/root/.cargo/bin:${PATH}"

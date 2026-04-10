@@ -88,6 +88,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     info!("Terminating supervisor pod...");
                     std::process::exit(0);
                 }
+            } else {
+                //not k8s
+                if !is_drain_mode {
+                    //obtain new processes if there are empty slots and detect if the drain mode is enabled
+                    let result = sv_g.populate_empty_slots().await;
+                    drop(sv_g);
+                    if let Err(SlotsPopulationError::DrainModeObtained) = result {
+                        is_drain_mode = true;
+                        warn!("Drain mode is caught. Will not populate anymore");
+                        continue;
+                    }
+                } else if working_processes_cnt == 0 {
+                    info!("Terminating supervisor process...");
+                    std::process::exit(0);
+                }
             }
 
             tokio::time::sleep(Duration::from_secs(30)).await;
