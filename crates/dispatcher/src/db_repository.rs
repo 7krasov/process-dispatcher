@@ -140,4 +140,17 @@ impl DbRepository {
         query.execute(&self.pd_connection_pool).await?;
         Ok(())
     }
+
+    pub async fn update_process_state(
+        &self,
+        id: Uuid,
+        state: DispatchState,
+    ) -> Result<u64, sqlx::Error> {
+        let query = sqlx::query("UPDATE dispatcher_processes SET state = ? WHERE uuid = ?")
+            .bind(state.to_string())
+            .bind(id);
+
+        let result = query.execute(&self.pd_connection_pool).await?;
+        Ok(result.rows_affected())
+    }
 }

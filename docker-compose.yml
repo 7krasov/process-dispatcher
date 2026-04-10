@@ -58,6 +58,8 @@ services:
       - CARGO_TARGET_DIR=/var/app/docker-target
       - HTTP_PORT=8090
       - HOST_NAME=process_supervisor
+      - OBTAIN_PROCESS_URL=http://process_dispatcher:8089/obtain_new_process/{supervisor_id}
+      - REPORT_PROCESS_FINISH_URL=http://process_dispatcher:8089/report_process_finish/{process_id}
     ports:
       - "8090:8090"
     command: cargo run --bin process_supervisor

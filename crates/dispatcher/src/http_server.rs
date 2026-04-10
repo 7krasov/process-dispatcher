@@ -2,7 +2,7 @@ mod route_handlers;
 
 use crate::cancellation_ext::{CancellationError, CancellationExt};
 use crate::dispatcher::Dispatcher;
-use axum::routing::post;
+use axum::routing::{get, patch};
 use axum::Router;
 use tracing::{info, warn};
 use std::net::SocketAddr;
@@ -39,8 +39,12 @@ pub async fn start_http_server(
 ) {
     let router = Router::new()
         .route(
-            "/assign_process/{supervisor_id}",
-            post(route_handlers::assign_process_handler),
+            "/obtain_new_process/{supervisor_id}",
+            get(route_handlers::obtain_new_process_handler),
+        )
+        .route(
+            "/report_process_finish/{process_id}",
+            patch(route_handlers::report_process_finish_handler),
         )
         .with_state(Arc::new(AppState { dispatcher }));
     let addr = SocketAddr::from(([0, 0, 0, 0], http_port));

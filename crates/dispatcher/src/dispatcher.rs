@@ -9,7 +9,9 @@ use chrono_tz::Tz;
 use chrono_tz::Tz::UTC;
 pub use error::DispatcherError;
 use futures::stream::TryStreamExt;
-use shared::{AssignedProcess, DispatchState, ProcessingMode};
+use shared::{
+    AssignedProcess, DispatchState, ProcessingMode, REPORT_STATUS_ERROR, REPORT_STATUS_SUCCESS,
+};
 use sqlx::mysql::MySqlRow;
 use sqlx::Row;
 use std::str::FromStr;
@@ -238,6 +240,52 @@ impl Dispatcher {
                     return Ok(Some(assigned_process));
                 }
             }
+        }
+    }
+
+    pub async fn report_process_finish(
+        &self,
+        process_id: Uuid,
+        result: &str,
+    ) -> Result<(), ReportFinishError> {
+        let new_state = match result {
+            REPORT_STATUS_SUCCESS => DispatchState::Completed,
+            REPORT_STATUS_ERROR => DispatchState::Failed,
+            other => return Err(ReportFinishError::InvalidResult(other.to_owned())),
+        };
+
+        info!(
+            %process_id,
+            state = %new_state,
+            "Reporting process finish..."
+        );
+
+        let rows_affected = self
+            .db_repository
+            .update_process_state(process_id, new_state)
+            .await
+            .map_err(ReportFinishError::Db)?;
+
+        if rows_affected == 0 {
+            return Err(ReportFinishError::NotFound(process_id));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub enum ReportFinishError {
+    InvalidResult(String),
+    NotFound(Uuid),
+    Db(sqlx::Error),
+}
+
+impl std::fmt::Display for ReportFinishError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReportFinishError::InvalidResult(v) => write!(f, "invalid result value '{}'", v),
+            ReportFinishError::NotFound(id) => write!(f, "process {} not found", id),
+            ReportFinishError::Db(e) => write!(f, "db error: {}", e),
         }
     }
 }

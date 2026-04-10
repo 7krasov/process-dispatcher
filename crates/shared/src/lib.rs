@@ -118,3 +118,15 @@ impl AssignedProcess {
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ProcessFinishReport {
+    pub process_id: String,
+    pub result: String,
+}
+
+impl ProcessFinishReport {
+    pub fn new(process_id: String, result: String) -> Self {
+        ProcessFinishReport { process_id, result }
+    }
+}

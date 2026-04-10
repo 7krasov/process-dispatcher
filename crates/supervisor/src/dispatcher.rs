@@ -1,8 +1,8 @@
 use crate::env::EnvParams;
-use serde_derive::Serialize;
 use tracing::{error, info};
 
 pub use shared::AssignedProcess;
+pub use shared::ProcessFinishReport;
 pub use shared::REPORT_STATUS_ERROR;
 pub use shared::REPORT_STATUS_SUCCESS;
 
@@ -107,14 +107,3 @@ impl DispatcherClient {
     }
 }
 
-#[derive(Serialize, Debug)]
-pub struct ProcessFinishReport {
-    process_id: String,
-    result: String,
-}
-
-impl ProcessFinishReport {
-    pub fn new(process_id: String, result: String) -> Self {
-        ProcessFinishReport { process_id, result }
-    }
-}
